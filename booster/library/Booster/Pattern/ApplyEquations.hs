@@ -55,6 +55,7 @@ import Data.Text.Encoding qualified as Text
 import Prettyprinter
 
 import Booster.Builtin as Builtin
+import Booster.Builtin.INT qualified as INT
 import Booster.Definition.Attributes.Base
 import Booster.Definition.Base
 import Booster.GlobalState qualified as GlobalState
@@ -986,6 +987,13 @@ applyEquation term rule =
                             , IndeterminateMatch
                             )
                     MatchSuccess subst -> do
+                        -- A total rule template can still erase a partial matched operand.
+                        let erased = Map.withoutKeys subst (freeVariables rule.rhs)
+                        unless (all syntacticallyDefined $ Map.elems erased) $
+                            throwE
+                                ( \ctxt -> ctxt $ logMessage ("Erased match may be undefined" :: Text)
+                                , RuleNotPreservingDefinedness
+                                )
                         -- cancel if condition
                         -- forall (v, t) : subst. concrete(v) -> isConstructorLike(t) /\
                         --                        symbolic(v) -> not $ t isConstructorLike(t)
@@ -1022,6 +1030,18 @@ applyEquation term rule =
                             lift cacheReset
                         pure $ substituteInTerm subst rule.rhs
   where
+    syntacticallyDefined :: Term -> Bool
+    syntacticallyDefined Var{} = True
+    syntacticallyDefined DomainValue{} = True
+    syntacticallyDefined (Injection _ _ child) = syntacticallyDefined child
+    syntacticallyDefined (SymbolApplication symbol _ [numerator, denominator])
+        | symbol.attributes.hook == Just "INT.emod"
+        , Just divisor <- INT.readIntTerm denominator
+        , divisor /= 0 = syntacticallyDefined numerator
+    syntacticallyDefined (SymbolApplication symbol _ children) =
+        isDefinedSymbol symbol && all syntacticallyDefined children
+    syntacticallyDefined _ = False
+
     filterOutKnownConstraints :: Set Predicate -> [Predicate] -> EquationT io [Predicate]
     filterOutKnownConstraints priorKnowledge constraitns = do
         let (knownTrue, toCheck) = partition (`Set.member` priorKnowledge) constraitns

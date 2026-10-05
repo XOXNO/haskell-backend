@@ -48,6 +48,7 @@ import Data.Default
 import Data.Functor.Const
 import Data.Functor.Foldable qualified as Recursive
 import Data.Generics.Product.Fields
+import Data.Map.Lazy qualified as LazyMap
 import Data.Map.Strict (
     Map,
  )
@@ -559,13 +560,16 @@ backTranslateWith
                 && Text.last t == '>'
                 && Text.all isDigit (Text.init $ Text.tail t)
 
-        -- Reverse map of symbol metadata (collisions forbidden).
+        -- Unused overloaded names must not fail unrelated arithmetic models.
+        -- Looking up an ambiguous name still fails; do not choose a symbol.
         -- We omit symbols that have an smt-hook (they should never
         -- occur in a result)
         reverseMetadata :: Map.Map SExpr Symbol
         reverseMetadata =
-            Map.map symbolFrom
-                . invert
+            LazyMap.map symbolFrom
+                . LazyMap.fromListWithKey (\k x y -> error $ show (k, x, y))
+                . map swap
+                . Map.toList
                 . Map.map AST.symbolData
                 $ Map.filter ((\sym -> (not (isBuiltin sym) || isMinus sym)) . AST.symbolDeclaration) symbols
 
