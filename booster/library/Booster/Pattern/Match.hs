@@ -32,7 +32,8 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Prettyprinter
 
-import Booster.Definition.Attributes.Base (KListDefinition, KMapDefinition, KSetDefinition)
+import Booster.Builtin.INT qualified as INT
+import Booster.Definition.Attributes.Base (KListDefinition, KMapDefinition, KSetDefinition, SymbolAttributes (hook))
 import Booster.Definition.Base
 import Booster.Pattern.Base
 import Booster.Pattern.Pretty
@@ -687,7 +688,7 @@ matchMaps
             -- before matching map keys.
                 enqueueMapProblem (KMap def patKeyVals patRest) (KMap def subjKeyVals subjRest)
             else do
-                let patternKeyVals = map (first (Substitution.substituteInTerm st.mSubstitution)) patKeyVals
+                let patternKeyVals = map (first (normaliseMapKey . Substitution.substituteInTerm st.mSubstitution)) patKeyVals
                 -- check for duplicate keys
                 checkDuplicateKeys patternKeyVals patRest
                 checkDuplicateKeys subjKeyVals subjRest
@@ -705,6 +706,19 @@ matchMaps
                         (toRemainderMap (Map.toList subjExtra) subjRest)
                 enqueueRegularProblems $ (Seq.fromList $ Map.elems commonMap) >< rest
       where
+        -- Substituted local indices such as I - 1 can become concrete map keys.
+        normaliseMapKey (Injection source target child) =
+            Injection source target (normaliseMapKey child)
+        normaliseMapKey term@(FunctionApplication symbol [] children)
+            | symbol.attributes.hook == Just "INT.sub"
+            , null symbol.sortVars
+            , symbol.argSorts == [SortInt, SortInt]
+            , symbol.resultSort == SortInt
+            , Just builtin <- Map.lookup "INT.sub" INT.builtinsINT
+            , Right (Just result) <- runExcept (builtin children) = result
+            | otherwise = term
+        normaliseMapKey term = term
+
         checkDuplicateKeys assocs rest =
             let duplicates =
                     Map.filter (> (1 :: Int)) $ foldr (flip (Map.insertWith (+)) 1 . fst) mempty assocs
