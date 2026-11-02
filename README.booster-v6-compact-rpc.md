@@ -11,6 +11,11 @@ the extra source selected by the native Komet `test_borrow_double` proof from
 | `booster/library/Booster/Pattern/Match.hs` | `633f001160d664c35eba45c0a1dcf9e92115a05f9779098782a865bbe931b7ad` |
 | `booster/MapKeyCheck.hs` | `38f73eb9c0fab4af3a8300f265e6edd9d287316f01c2fb5de3c38e70cf86c8be` |
 
+The comparison uses resolved file contents: 37 pre-existing test-fixture paths
+are Git symlinks but were materialized as regular files in the historical
+snapshot. Their link targets are preserved and resolve within this repository
+to the exact recorded bytes. There are no content mismatches or extra paths.
+
 The compact-RPC change lives in this repository's separate `kore-rpc-types`
 package at `kore-rpc-types/src/Kore/JsonRpc/Server.hs`, SHA-256
 `e2007b88090c4a63ff4c034c0e120a93251fc0157c7d125492dac598951cb4a7`.
