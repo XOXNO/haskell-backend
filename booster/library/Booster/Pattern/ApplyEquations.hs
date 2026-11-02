@@ -987,13 +987,6 @@ applyEquation term rule =
                             , IndeterminateMatch
                             )
                     MatchSuccess subst -> do
-                        -- A total rule template can still erase a partial matched operand.
-                        let erased = Map.withoutKeys subst (freeVariables rule.rhs)
-                        unless (all syntacticallyDefined $ Map.elems erased) $
-                            throwE
-                                ( \ctxt -> ctxt $ logMessage ("Erased match may be undefined" :: Text)
-                                , RuleNotPreservingDefinedness
-                                )
                         -- cancel if condition
                         -- forall (v, t) : subst. concrete(v) -> isConstructorLike(t) /\
                         --                        symbolic(v) -> not $ t isConstructorLike(t)
@@ -1017,7 +1010,20 @@ applyEquation term rule =
                         -- check required constraints from lhs.
                         -- Reaction on false/indeterminate varies depending on the equation's type (function/simplification),
                         -- see @handleSimplificationEquation@ and @handleFunctionEquation@
-                        checkRequires subst
+                        -- A skipped erasing rule must not retain facts from its requires.
+                        let erased = Map.withoutKeys subst (freeVariables rule.rhs)
+                            erasedIsDefined = all syntacticallyDefined $ Map.elems erased
+                        prior <- lift getState
+                        requiresResult <- lift $ runExceptT (checkRequires subst)
+                        unless erasedIsDefined $ lift $ eqState (put prior)
+                        either throwE pure requiresResult
+
+                        -- A total rule template can still erase a partial matched operand.
+                        unless erasedIsDefined $
+                            throwE
+                                ( \ctxt -> ctxt $ logMessage ("Erased match may be undefined" :: Text)
+                                , RuleNotPreservingDefinedness
+                                )
 
                         -- check ensured conditions, filter any true ones, prune if any is false
                         ensuredConditions <- checkEnsures subst
@@ -1035,7 +1041,7 @@ applyEquation term rule =
     syntacticallyDefined DomainValue{} = True
     syntacticallyDefined (Injection _ _ child) = syntacticallyDefined child
     syntacticallyDefined (SymbolApplication symbol _ [numerator, denominator])
-        | symbol.attributes.hook == Just "INT.emod"
+        | symbol.attributes.hook `elem` [Just "INT.emod", Just "INT.tdiv"]
         , Just divisor <- INT.readIntTerm denominator
         , divisor /= 0 = syntacticallyDefined numerator
     syntacticallyDefined (SymbolApplication symbol _ children) =

@@ -23,7 +23,7 @@ import Control.Monad.Logger (MonadLoggerIO)
 import Control.Monad.Logger qualified as Log
 import Control.Monad.Reader (MonadReader (ask), runReaderT)
 import Data.Aeson (ToJSON, Value (Null))
-import Data.Aeson.Encode.Pretty as Json
+import Data.Aeson qualified as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy.Char8 qualified as L8
 import Data.Conduit (ConduitT, Void, runConduit, (.|))
@@ -32,21 +32,19 @@ import Data.Conduit.Network (ServerSettings, appSink, appSockAddr, appSource, ru
 import Data.Conduit.TMChan (closeTBMChan, sinkTBMChan, sourceTBMChan)
 import Data.Maybe (catMaybes)
 import Data.Text (Text, pack)
-import Kore.JsonRpc.Types (FromRequestCancellable (isCancel), ReqException (..), rpcJsonConfig)
+import Kore.JsonRpc.Types (FromRequestCancellable (isCancel), ReqException (..))
 import Network.JSONRPC hiding (encodeConduit, runJSONRPCT)
 import UnliftIO (MonadUnliftIO, atomically, wait, withAsync)
 
 -- Conduit to encode JSON to ByteString.
-encodeConduit :: (ToJSON j, Monad m) => Json.Config -> ConduitT j ByteString m ()
-encodeConduit encodeOpts = CL.mapM $ \m -> return . L8.toStrict $ encodePretty' encodeOpts m
+encodeConduit :: (ToJSON j, Monad m) => ConduitT j ByteString m ()
+encodeConduit = CL.mapM $ \m -> return . L8.toStrict $ Aeson.encode m <> "\n"
 
 {- | Create JSON-RPC session around conduits from transport layer.  When
  context exits session disappears.
 -}
 runJSONRPCT ::
     (MonadLoggerIO m, MonadUnliftIO m) =>
-    -- | aeson-pretty Config
-    Json.Config ->
     -- | JSON-RPC version
     Ver ->
     -- | Ignore incoming requests/notifs
@@ -59,13 +57,13 @@ runJSONRPCT ::
     JSONRPCT m a ->
     -- | Output of action
     m a
-runJSONRPCT encodeOpts ver ignore snk src f = do
+runJSONRPCT ver ignore snk src f = do
     qs <- liftIO . atomically $ initSession ver ignore
     let inSnk = sinkTBMChan (inCh qs)
         outSrc = sourceTBMChan (outCh qs)
     withAsync (runConduit $ src .| decodeConduit ver .| inSnk) $
         const $
-            withAsync (runConduit $ outSrc .| encodeConduit encodeOpts .| snk) $ \o ->
+            withAsync (runConduit $ outSrc .| encodeConduit .| snk) $ \o ->
                 withAsync (runReaderT processIncoming qs) $
                     const $ do
                         a <- runReaderT f qs
@@ -95,7 +93,6 @@ jsonRpcServer serverSettings runBound onConnect respond handlers =
             runJSONRPCT
                 -- we have to ensure that the returned messages contain no newlines
                 -- inside the message and have a trailing newline, which is used as the delimiter
-                rpcJsonConfig{Json.confIndent = Spaces 0, Json.confTrailingNewline = True}
                 V2
                 False
                 (appSink cl)
